@@ -193,13 +193,52 @@ class FacebookGraphQLClient:
 
     # ─── Search ──────────────────────────────────────────────────
 
-    def search_posts(self, keyword, max_posts=60):
+    @staticmethod
+    def _build_date_filter_args(since, until):
+        """Build date filter args string for GraphQL search filters.
+        
+        Format: {"start_year":"2026","start_month":"2026-8","start_day":"2026-8-25",
+                 "end_year":"2026","end_month":"2026-8","end_day":"2026-8-29"}
+        Note: month/day NOT zero-padded (YYYY-M-D)
+        """
+        from datetime import datetime
+        start = since or "2020-1-1"
+        end = until or "2099-12-31"
+        
+        try:
+            sd = datetime.strptime(start, "%Y-%m-%d")
+            ed = datetime.strptime(end, "%Y-%m-%d")
+        except:
+            return ""
+
+        date_args = {
+            "start_year": str(sd.year),
+            "start_month": f"{sd.year}-{sd.month}",
+            "end_year": str(ed.year),
+            "end_month": f"{ed.year}-{ed.month}",
+            "start_day": f"{sd.year}-{sd.month}-{sd.day}",
+            "end_day": f"{ed.year}-{ed.month}-{ed.day}",
+        }
+        return json.dumps(date_args)
+
+    def search_posts(self, keyword, max_posts=60, since=None, until=None, location_id=None):
         log.info(f"Searching Facebook for '{keyword}' (max {max_posts})...")
         all_posts = []
         cursor = None
         bsid = str(uuid.uuid4())
         tsid = None
         page = 0
+
+        # Build server-side filters
+        filters = []
+        if since or until:
+            date_args = self._build_date_filter_args(since, until)
+            filters.append(json.dumps({"name": "creation_time", "args": date_args}))
+        if location_id:
+            filters.append(json.dumps({"name": "location", "args": str(location_id)}))
+
+        if filters:
+            log.info(f"  Server-side filters: {len(filters)} active")
 
         while len(all_posts) < max_posts:
             page += 1
@@ -222,7 +261,7 @@ class FacebookGraphQLClient:
                         "fbid": None,
                         "type": "POSTS_TAB",
                     },
-                    "filters": [],
+                    "filters": filters,
                     "text": keyword,
                 },
                 "count": count,
@@ -547,26 +586,14 @@ def run_pipeline(keyword, max_posts, max_comments, sort_mode="top", output_path=
     client = FacebookGraphQLClient(FB_COOKIES_PATH)
     client.authenticate()
 
-    # Step 1: Search
+    # Step 1: Search (with server-side date filter)
     log.info(f"\n[Step 1] GraphQL search posts...")
-    # Search more posts to account for filtering
-    search_limit = max_posts * 3 if (since or until or location) else max_posts
-    posts = client.search_posts(keyword, search_limit)
-    log.info(f"  Found {len(posts)} posts (before filtering)")
+    # Server-side date filter via creation_time filter (stringified JSON)
+    # Location still client-side (needs place ID lookup)
+    posts = client.search_posts(keyword, max_posts, since=since, until=until)
+    log.info(f"  Found {len(posts)} posts")
 
-    # Filter by date range (client-side)
-    if since or until:
-        since_ts = _date_to_ts(since) if since else 0
-        until_ts = _date_to_ts(until, end_of_day=True) if until else 9999999999
-        filtered = []
-        for p in posts:
-            ts = p.get("timestamp", 0) or 0
-            if since_ts <= ts <= until_ts:
-                filtered.append(p)
-        log.info(f"  Date filter ({since or 'any'} to {until or 'any'}): {len(filtered)}/{len(posts)} posts")
-        posts = filtered
-
-    # Filter by location (keyword in message or author)
+    # Client-side location filter (keyword-based fallback)
     if location:
         loc_lower = location.lower()
         filtered = []
@@ -578,8 +605,7 @@ def run_pipeline(keyword, max_posts, max_comments, sort_mode="top", output_path=
         log.info(f"  Location filter '{location}': {len(filtered)}/{len(posts)} posts")
         posts = filtered
 
-    posts = posts[:max_posts]
-    log.info(f"  Final: {len(posts)} posts after filtering")
+    log.info(f"  Final: {len(posts)} posts")
     for i, p in enumerate(posts):
         ts = p.get("timestamp", 0)
         from datetime import datetime as _dt
