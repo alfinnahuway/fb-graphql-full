@@ -173,21 +173,37 @@ class FacebookGraphQLClient:
         text = r.text.strip()
         if text.startswith("for (;;);"):
             text = text[len("for (;;);"):]
-        try:
-            return json.loads(text.split("\n")[0].strip())
-        except:
-            return None
+
+        # Parse ALL JSON lines (Facebook returns streaming JSON)
+        results = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                results.append(json.loads(line))
+            except:
+                pass
+
+        # Return the first valid result with data, or first result
+        for obj in results:
+            if obj.get("data"):
+                return obj
+        return results[0] if results else None
 
     # ─── Search ──────────────────────────────────────────────────
 
-    def search_posts(self, keyword, max_posts=20):
+    def search_posts(self, keyword, max_posts=60):
         log.info(f"Searching Facebook for '{keyword}' (max {max_posts})...")
         all_posts = []
         cursor = None
+        bsid = str(uuid.uuid4())
+        tsid = None
         page = 0
 
         while len(all_posts) < max_posts:
             page += 1
+            count = min(max_posts - len(all_posts), 8)
             variables = {
                 "allow_streaming": False,
                 "args": {
@@ -199,7 +215,7 @@ class FacebookGraphQLClient:
                         "sts_disambiguation": None,
                         "watch_config": None,
                     },
-                    "context": {"bsid": str(uuid.uuid4()), "tsid": None},
+                    "context": {"bsid": bsid, "tsid": tsid},
                     "experience": {
                         "client_defined_experiences": ["ADS_PARALLEL_FETCH"],
                         "encoded_server_defined_params": None,
@@ -209,7 +225,7 @@ class FacebookGraphQLClient:
                     "filters": [],
                     "text": keyword,
                 },
-                "count": min(max_posts - len(all_posts), 8),
+                "count": count,
                 "cursor": cursor,
                 "feedLocation": "SEARCH",
                 "feedbackSource": 23,
@@ -232,6 +248,7 @@ class FacebookGraphQLClient:
             self.session.headers["Referer"] = f"https://www.facebook.com/search/posts?q={keyword}"
 
             if not data or "data" not in data or not data["data"]:
+                log.info(f"  Page {page}: no data, stopping")
                 break
 
             serp = data["data"].get("serpResponse", {})
@@ -239,6 +256,7 @@ class FacebookGraphQLClient:
             edges = results.get("edges", [])
 
             if not edges:
+                log.info(f"  Page {page}: 0 edges, stopping")
                 break
 
             for edge in edges:
@@ -248,18 +266,49 @@ class FacebookGraphQLClient:
 
             log.info(f"  Page {page}: {len(edges)} posts (total: {len(all_posts)})")
 
-            # Get next cursor
-            page_info = results.get("page_info", {}) or {}
-            cursor = page_info.get("end_cursor") or page_info.get("has_next_page") and page_info.get("end_cursor")
-            if not cursor:
-                # Try to extract cursor from synced data
-                synced = serp.get("synced_result_sets_config", {})
-                if synced:
-                    cursor = json.dumps(synced.get("cursor", "")) if synced.get("cursor") else None
-                if not cursor:
-                    break
-            time.sleep(1)
+            if len(all_posts) >= max_posts:
+                break
 
+            # Extract next cursor — try multiple paths
+            next_cursor = None
+            for pi_path in ["page_info", "pageInfo"]:
+                page_info = results.get(pi_path, {}) or serp.get(pi_path, {}) or {}
+                next_cursor = page_info.get("end_cursor")
+                has_next = page_info.get("has_next_page", False)
+                if next_cursor and has_next:
+                    break
+                next_cursor = None
+
+            # Fallback: search raw response for cursor in synced data
+            if not next_cursor:
+                synced = serp.get("synced_result_sets_config", {}) or {}
+                if synced:
+                    raw_cursor = synced.get("cursor")
+                    if raw_cursor:
+                        next_cursor = raw_cursor if isinstance(raw_cursor, str) else json.dumps(raw_cursor)
+
+            if not next_cursor:
+                # Try to find cursor in the streaming JSON lines
+                log.info(f"  Page {page}: no end_cursor found")
+
+                # Last resort: check if response has multiple JSON objects
+                # (Facebook sometimes returns multiple streaming responses)
+                break
+
+            cursor = next_cursor
+
+            # Extract next bsid/tsid from first edge's chaining_params
+            if edges:
+                first_vm = edges[0].get("rendering_strategy", {}).get("view_model", {})
+                chaining = first_vm.get("chaining_action_view_model", {}).get("chaining_params", {})
+                if chaining.get("bsid"):
+                    bsid = chaining["bsid"]
+                if chaining.get("tsid"):
+                    tsid = chaining["tsid"]
+
+            time.sleep(1.5)  # Rate limit between search pages
+
+        log.info(f"  Search complete: {len(all_posts)} posts in {page} page(s)")
         return all_posts[:max_posts]
 
     def _parse_search_result(self, edge):
