@@ -1,0 +1,19 @@
+{
+  "batch_run_at": "2026-08-29T09:10:25.960076+00:00",
+  "config_file": "targets.yaml",
+  "total_targets": 1,
+  "total_posts": 32,
+  "total_comments": 870,
+  "total_replies": 634,
+  "elapsed_seconds": 628.8,
+  "targets": [
+    {
+      "target_id": "isu_kebakaran",
+      "target_name": "Monitoring Isu Kebakaran",
+      "total_posts": 32,
+      "total_comments": 870,
+      "total_replies": 634,
+      "elapsed_seconds": 628.8
+    }
+  ]
+}

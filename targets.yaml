@@ -1,0 +1,129 @@
+# ──────────────────────────────────────────────────────────────
+# Facebook Scraper — Target Configuration
+# ──────────────────────────────────────────────────────────────
+# Format: YAML, satu entry per parlimen/orang publik
+# Field:
+#   id:          unique identifier (slug, no spaces)
+#   name:        Nama parlimen / tokoh
+#   category:    kategori (parlemen, pejabat, partai, dll)
+#   accounts:    list Facebook username/ID (untuk monitoring langsung)
+#   keywords:    list keyword search via GraphQL
+#   settings:    override default scraper settings per-target
+# ──────────────────────────────────────────────────────────────
+
+# DEFAULT SETTINGS (bisa di-override per-target)
+defaults:
+  max_posts: 30          # post per keyword
+  max_comments: 100      # komen per post
+  sort: top              # top | recent
+  since: null            # null = no filter, atau "2026-08-25"
+  until: null
+  location: null         # null = no filter, atau keyword lokasi
+  delay_between_keywords: 3   # detik jeda antar keyword dalam 1 target
+  delay_between_targets: 10   # detik jeda antar target
+
+# ──────────────────────────────────────────────────────────────
+# TARGETS — 66 PARLIMEN
+# ──────────────────────────────────────────────────────────────
+# TODO: Isi dengan 66 parlimen asli dari client
+# Sekarang baru template — ganti <isi> dengan data asli
+
+targets:
+  # ── CONTOH 1: Tokoh publik ──
+  - id: anies_baswedan
+    name: "Anies Baswedan"
+    category: "tokoh_publik"
+    accounts:
+      - "aniesbaswedan"      # Facebook username
+      - "615500000000001"    # atau Facebook UID
+    keywords:
+      - "Anies Baswedan"
+      - "Pilkada Jakarta 2026"
+      - "Anies capres"
+    settings:
+      max_posts: 30
+      max_comments: 100
+      sort: recent           # recent = deteksi early-warning
+      since: "2026-08-25"
+      until: "2026-08-29"
+
+  # ── CONTOH 2: Partai politik ──
+  - id: pk_sejahtera
+    name: "Partai Keadilan Sejahtera"
+    category: "partai"
+    accounts:
+      - "pksejahtera"
+    keywords:
+      - "PK Sejahtera"
+      - "Partai Keadilan Sejahtera"
+      - "RUU ASN"
+    settings:
+      max_posts: 25
+      max_comments: 150
+      sort: top
+
+  # ── CONTOH 3: Isu khusus ──
+  - id: isu_kebakaran
+    name: "Monitoring Isu Kebakaran"
+    category: "isu"
+    accounts: []
+    keywords:
+      - "Kebakaran"
+      - "Kebakaran hutan"
+      - "Karhutla"
+    settings:
+      max_posts: 50
+      max_comments: 50
+      sort: recent
+      since: "2026-08-25"
+      until: "2026-08-29"
+      location: "Kalimantan"
+
+  # ── CONTOH 4: Parlimen dengan multiple accounts ──
+  - id: dpr_komisi1
+    name: "DPR Komisi I"
+    category: "parlemen"
+    accounts:
+      - "dprri"
+      - "komisi1.dpr"
+    keywords:
+      - "DPR Komisi I"
+      - "Pertahanan negara"
+      - "Luas negeri Indonesia"
+    settings:
+      max_posts: 25
+      max_comments: 100
+      sort: top
+
+  # ── CONTOH 5: Akun individu ──
+  - id: prabowo_subianto
+    name: "Prabowo Subianto"
+    category: "pejabat"
+    accounts:
+      - "prabowo"
+    keywords:
+      - "Prabowo Subianto"
+      - "Kabinet Merah Putih"
+      - "RUU Perampasan Aset"
+    settings:
+      max_posts: 30
+      max_comments: 200
+      sort: recent           # recent untuk deteksi marah/ekstrem
+      since: "2026-08-25"
+      until: "2026-08-29"
+
+  # ── TEMPLATE KOSONG (copy-paste untuk 66 parlimen) ──
+  # - id: <slug_nama>
+  #   name: "<Nama Lengkap>"
+  #   category: "parlemen"
+  #   accounts:
+  #     - "<facebook_username>"
+  #   keywords:
+  #     - "<keyword 1>"
+  #     - "<keyword 2>"
+  #   settings:
+  #     max_posts: 30
+  #     max_comments: 100
+  #     sort: recent
+  #     since: "2026-08-25"
+  #     until: "2026-08-29"
