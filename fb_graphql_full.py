@@ -392,7 +392,10 @@ class FacebookGraphQLClient:
                 "url": url,
                 "feedback_id": feedback.get("id", ""),
                 "message": msg_text,
+                "hashtags": _extract_hashtags(msg_text),
+                "mentions": _extract_mentions(msg_text),
                 "timestamp": story.get("creation_time", None),
+                "permalink_url": story.get("permalink_url", ""),
                 "comments": [],
             }
         except:
@@ -530,6 +533,36 @@ class FacebookGraphQLClient:
         exp_info = feedback.get("expansion_info", {}) or {}
         exp_token = exp_info.get("expansion_token", "")
 
+        # Total reactions (e.g. "9" or 9)
+        reactors = feedback.get("reactors", {}) or {}
+        likes_count = reactors.get("count_reduced", reactors.get("count", 0))
+
+        # Reaction breakdown (LIKE, LOVE, HAHA, etc.)
+        # Reaction node IDs: 1635855486666999=LIKE, 1678524932434102=LOVE,
+        # 478547315744583=HAHA, 656520638348042=WOW, 616785628324312=SAD, 908950955142546=ANGRY
+        reaction_map = {
+            "1635855486666999": "like",
+            "1678524932434102": "love",
+            "478547315744583": "haha",
+            "656520638348042": "wow",
+            "616785628324312": "sad",
+            "908950955142546": "angry",
+            "1152124759564958": "care",
+        }
+        reactions = {}
+        top_reactions = feedback.get("top_reactions", {}) or {}
+        for edge in top_reactions.get("edges", []):
+            rc = edge.get("reaction_count", 0)
+            node_id = edge.get("node", {}).get("id", "")
+            rname = reaction_map.get(node_id, node_id)
+            if rc:
+                reactions[rname] = rc
+
+        # Reply count
+        replies_fields = feedback.get("replies_fields", {}) or {}
+        reply_count = replies_fields.get("total_count", 0)
+
+        # Inline replies
         replies_conn = feedback.get("replies_connection", {}) or {}
         inline_replies = []
         for redge in replies_conn.get("edges", []):
@@ -539,14 +572,36 @@ class FacebookGraphQLClient:
 
         return {
             "name": author.get("name", ""),
+            "author_id": str(author.get("id", "")),
+            "author_url": f"https://www.facebook.com/{author.get('id', '')}" if author.get("id") else "",
             "text": body.get("text", ""),
-            "likes_count": feedback.get("reactors", {}).get("count_reduced", 0),
+            "likes_count": likes_count,
+            "reactions": reactions,
+            "reply_count": reply_count,
             "timestamp": node.get("created_time", ""),
             "comment_id": node.get("id", ""),
             "feedback_id": feedback_id,
             "expansion_token": exp_token,
             "replies": inline_replies,
         }
+
+
+# ─── Helpers ───────────────────────────────────────────────────
+
+def _extract_hashtags(text):
+    """Extract hashtags (#hashtag) from text."""
+    if not text:
+        return []
+    import re
+    return re.findall(r'#(\w+)', text)
+
+
+def _extract_mentions(text):
+    """Extract mentions (@username) from text."""
+    if not text:
+        return []
+    import re
+    return re.findall(r'@(\w+)', text)
 
 
 # ─── Pipeline ──────────────────────────────────────────────────
