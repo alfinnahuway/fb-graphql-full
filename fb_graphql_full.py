@@ -512,7 +512,21 @@ class FacebookGraphQLClient:
 
 # ─── Pipeline ──────────────────────────────────────────────────
 
-def run_pipeline(keyword, max_posts, max_comments, sort_mode="top", output_path=None):
+def _date_to_ts(date_str, end_of_day=False):
+    """Convert YYYY-MM-DD to Unix timestamp."""
+    from datetime import datetime
+    try:
+        if end_of_day:
+            dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        else:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return int(dt.timestamp())
+    except:
+        return 0
+
+
+def run_pipeline(keyword, max_posts, max_comments, sort_mode="top", output_path=None,
+                 since=None, until=None, location=None):
     from config import FB_COOKIES_PATH, OUTPUT_DIR
 
     start = time.time()
@@ -522,6 +536,12 @@ def run_pipeline(keyword, max_posts, max_comments, sort_mode="top", output_path=
     log.info(f"  Max posts:    {max_posts}")
     log.info(f"  Max comments: {max_comments}")
     log.info(f"  Sort:         {sort_mode}")
+    if since:
+        log.info(f"  Since:         {since}")
+    if until:
+        log.info(f"  Until:         {until}")
+    if location:
+        log.info(f"  Location:      {location}")
     log.info("=" * 60)
 
     client = FacebookGraphQLClient(FB_COOKIES_PATH)
@@ -529,10 +549,42 @@ def run_pipeline(keyword, max_posts, max_comments, sort_mode="top", output_path=
 
     # Step 1: Search
     log.info(f"\n[Step 1] GraphQL search posts...")
-    posts = client.search_posts(keyword, max_posts)
-    log.info(f"  Found {len(posts)} posts")
+    # Search more posts to account for filtering
+    search_limit = max_posts * 3 if (since or until or location) else max_posts
+    posts = client.search_posts(keyword, search_limit)
+    log.info(f"  Found {len(posts)} posts (before filtering)")
+
+    # Filter by date range (client-side)
+    if since or until:
+        since_ts = _date_to_ts(since) if since else 0
+        until_ts = _date_to_ts(until, end_of_day=True) if until else 9999999999
+        filtered = []
+        for p in posts:
+            ts = p.get("timestamp", 0) or 0
+            if since_ts <= ts <= until_ts:
+                filtered.append(p)
+        log.info(f"  Date filter ({since or 'any'} to {until or 'any'}): {len(filtered)}/{len(posts)} posts")
+        posts = filtered
+
+    # Filter by location (keyword in message or author)
+    if location:
+        loc_lower = location.lower()
+        filtered = []
+        for p in posts:
+            msg = (p.get("message", "") or "").lower()
+            author = (p.get("author", "") or "").lower()
+            if loc_lower in msg or loc_lower in author:
+                filtered.append(p)
+        log.info(f"  Location filter '{location}': {len(filtered)}/{len(posts)} posts")
+        posts = filtered
+
+    posts = posts[:max_posts]
+    log.info(f"  Final: {len(posts)} posts after filtering")
     for i, p in enumerate(posts):
-        log.info(f"  Post {i+1}: {p['author']} | post_id={p['post_id']}")
+        ts = p.get("timestamp", 0)
+        from datetime import datetime as _dt
+        date_str = _dt.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "no-date"
+        log.info(f"  Post {i+1}: {p['author']} | post_id={p['post_id']} | date={date_str}")
 
     # Step 2: Comments + Replies
     log.info(f"\n[Step 2] GraphQL fetch comments + replies...")
@@ -598,6 +650,9 @@ def main():
     parser.add_argument("--max-posts", type=int, default=5)
     parser.add_argument("--max-comments", type=int, default=100)
     parser.add_argument("--sort", choices=["top", "recent"], default="top")
+    parser.add_argument("--since", default=None, help="Start date YYYY-MM-DD")
+    parser.add_argument("--until", default=None, help="End date YYYY-MM-DD")
+    parser.add_argument("--location", default=None, help="Location keyword filter")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -607,6 +662,9 @@ def main():
         max_comments=args.max_comments,
         sort_mode=args.sort,
         output_path=args.output,
+        since=args.since,
+        until=args.until,
+        location=args.location,
     )
     print(f"\nDone! Posts: {result.get('total_posts', 0)} | "
           f"Comments: {result.get('total_comments', 0)} | "
