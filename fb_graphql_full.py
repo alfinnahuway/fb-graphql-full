@@ -276,10 +276,32 @@ class FacebookGraphQLClient:
             message = story_msg.get("message", {})
             msg_text = message.get("text", "") if message else ""
 
+            # Decode feedback_id to get post_id if missing
+            post_id = str(story.get("post_id", ""))
+            if not post_id and feedback.get("id", ""):
+                try:
+                    decoded = base64.b64decode(feedback["id"]).decode()
+                    # format: "feedback:{post_id}"
+                    if ":" in decoded:
+                        post_id = decoded.split(":")[-1]
+                except:
+                    pass
+
+            # Build URL from author_id and post_id
+            author_id = str(owner.get("id", ""))
+            if post_id and author_id:
+                url = f"https://www.facebook.com/{author_id}/posts/{post_id}"
+            elif post_id:
+                url = f"https://www.facebook.com/{post_id}"
+            else:
+                url = story.get("url", "")
+
             return {
-                "post_id": str(story.get("post_id", "")),
+                "post_id": post_id,
                 "author": owner.get("name", ""),
-                "author_id": str(owner.get("id", "")),
+                "author_id": author_id,
+                "author_url": f"https://www.facebook.com/{author_id}" if author_id else "",
+                "url": url,
                 "feedback_id": feedback.get("id", ""),
                 "message": msg_text,
                 "timestamp": story.get("creation_time", None),
